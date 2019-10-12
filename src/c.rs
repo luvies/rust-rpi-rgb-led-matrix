@@ -1,4 +1,4 @@
-use libc::{c_char, c_int, uint8_t}; //FILE};
+use libc::{c_char, c_int, c_uint}; //FILE};
 use std::ffi::CString;
 
 pub enum LedMatrix {}
@@ -14,18 +14,25 @@ pub struct LedColor {
 type LedMatrixOptionsResult = Result<(), &'static str>;
 
 #[repr(C, packed)]
-#[derive(Debug)]
 pub struct LedMatrixOptions {
     hardware_mapping: *mut c_char,
     rows: c_int,
+    cols: c_int,
     chain_length: c_int,
     parallel: c_int,
     pwm_bits: c_int,
     pwm_lsb_nanoseconds: c_int,
+    pwm_dither_bits: c_int,
     brightness: c_int,
     scan_mode: c_int,
+    row_address_type: c_int,
+    multiplexing: c_int,
     led_rgb_sequence: *mut c_char,
-    bitfield: u8,
+    pixel_mapper_config: *mut c_char,
+    panel_type: *mut c_char,
+    disable_hardware_pulsing: c_uint,
+    show_refresh_rate: c_uint,
+    inverse_colors: c_uint,
 }
 
 impl LedMatrixOptions {
@@ -33,14 +40,22 @@ impl LedMatrixOptions {
         LedMatrixOptions {
             hardware_mapping: CString::new("regular").unwrap().into_raw(),
             rows: 32,
+            cols: 32,
             chain_length: 1,
             parallel: 1,
             pwm_bits: 11,
             pwm_lsb_nanoseconds: 1000,
+            pwm_dither_bits: 1,
             brightness: 100,
             scan_mode: 0,
+            row_address_type: 0,
+            multiplexing: 0,
             led_rgb_sequence: CString::new("RGB").unwrap().into_raw(),
-            bitfield: 0,
+            pixel_mapper_config: CString::new("").unwrap().into_raw(),
+            panel_type: CString::new("").unwrap().into_raw(),
+            disable_hardware_pulsing: 1,
+            show_refresh_rate: 1,
+            inverse_colors: 1,
         }
     }
 
@@ -106,25 +121,25 @@ impl LedMatrixOptions {
 
     pub fn set_hardware_pulsing(&mut self, enable: bool) {
         if enable {
-            self.bitfield |= 0x01;
+            self.disable_hardware_pulsing = 0;
         } else {
-            self.bitfield &= !0x01;
+            self.disable_hardware_pulsing = 1;
         }
     }
 
     pub fn set_refresh_rate(&mut self, enable: bool) {
         if enable {
-            self.bitfield |= 0x01 << 1;
+            self.show_refresh_rate = 1;
         } else {
-            self.bitfield &= !(0x01 << 1);
+            self.show_refresh_rate = 0;
         }
     }
 
     pub fn set_inverse_colors(&mut self, enable: bool) {
         if enable {
-            self.bitfield |= 0x01 << 2;
+            self.inverse_colors = 1;
         } else {
-            self.bitfield &= !(0x01 << 2);
+            self.inverse_colors = 0;
         }
     }
 }
@@ -169,12 +184,7 @@ impl LedCanvas {
 
     pub fn fill(&mut self, color: &LedColor) {
         unsafe {
-            led_canvas_fill(
-                self,
-                color.red as uint8_t,
-                color.green as uint8_t,
-                color.blue as uint8_t,
-            );
+            led_canvas_fill(self, color.red, color.green, color.blue);
         }
     }
 
@@ -186,9 +196,9 @@ impl LedCanvas {
                 y0 as c_int,
                 x1 as c_int,
                 y1 as c_int,
-                color.red as uint8_t,
-                color.green as uint8_t,
-                color.blue as uint8_t,
+                color.red,
+                color.green,
+                color.blue,
             );
         }
     }
@@ -261,16 +271,9 @@ extern "C" {
     //    pub fn led_matrix_print_flags(out: *mut FILE);
     pub fn led_matrix_get_canvas(matrix: *mut LedMatrix) -> *mut LedCanvas;
     pub fn led_canvas_get_size(canvas: *const LedCanvas, width: *mut c_int, height: *mut c_int);
-    pub fn led_canvas_set_pixel(
-        canvas: *mut LedCanvas,
-        x: c_int,
-        y: c_int,
-        r: uint8_t,
-        g: uint8_t,
-        b: uint8_t,
-    );
+    pub fn led_canvas_set_pixel(canvas: *mut LedCanvas, x: c_int, y: c_int, r: u8, g: u8, b: u8);
     pub fn led_canvas_clear(canvas: *mut LedCanvas);
-    pub fn led_canvas_fill(canvas: *mut LedCanvas, r: uint8_t, g: uint8_t, b: uint8_t);
+    pub fn led_canvas_fill(canvas: *mut LedCanvas, r: u8, g: u8, b: u8);
     pub fn led_matrix_create_offscreen_canvas(matrix: *mut LedMatrix) -> *mut LedCanvas;
     pub fn led_matrix_swap_on_vsync(
         matrix: *mut LedMatrix,
@@ -283,9 +286,9 @@ extern "C" {
         font: *const LedFont,
         x: c_int,
         y: c_int,
-        r: uint8_t,
-        g: uint8_t,
-        b: uint8_t,
+        r: u8,
+        g: u8,
+        b: u8,
         utf8_text: *const c_char,
         kerning_offset: c_int,
     ) -> c_int;
@@ -294,9 +297,9 @@ extern "C" {
         font: *const LedFont,
         x: c_int,
         y: c_int,
-        r: uint8_t,
-        g: uint8_t,
-        b: uint8_t,
+        r: u8,
+        g: u8,
+        b: u8,
         utf8_text: *const c_char,
         kerning_offset: c_int,
     ) -> c_int;
@@ -305,9 +308,9 @@ extern "C" {
         x: c_int,
         y: c_int,
         radius: c_int,
-        r: uint8_t,
-        g: uint8_t,
-        b: uint8_t,
+        r: u8,
+        g: u8,
+        b: u8,
     );
     pub fn draw_line(
         canvas: *mut LedCanvas,
@@ -315,8 +318,8 @@ extern "C" {
         y0: c_int,
         x1: c_int,
         y1: c_int,
-        r: uint8_t,
-        g: uint8_t,
-        b: uint8_t,
+        r: u8,
+        g: u8,
+        b: u8,
     );
 }

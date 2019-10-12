@@ -219,7 +219,7 @@ mod tests {
         let mut options = LedMatrixOptions::new();
         options.set_hardware_mapping("adafruit-hat-pwm");
         options.set_chain_length(2);
-        options.set_hardware_pulsing(false);
+        options.set_disable_hardware_pulsing(true);
         //options.set_inverse_colors(true);
         //options.set_refresh_rate(true);
         LedMatrix::new(Some(options)).unwrap()

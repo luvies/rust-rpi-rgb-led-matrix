@@ -13,6 +13,7 @@ pub struct LedColor {
 
 type LedMatrixOptionsResult = Result<(), &'static str>;
 
+/// Parameters to create a new matrix.
 #[repr(C, packed)]
 pub struct LedMatrixOptions {
     hardware_mapping: *mut c_char,
@@ -36,6 +37,8 @@ pub struct LedMatrixOptions {
 }
 
 impl LedMatrixOptions {
+    /// Constructs a new LewMatrixOptions with the default values
+    /// pre-configured.
     pub fn new() -> LedMatrixOptions {
         LedMatrixOptions {
             hardware_mapping: CString::new("regular").unwrap().into_raw(),
@@ -59,6 +62,7 @@ impl LedMatrixOptions {
         }
     }
 
+    /// Name of the hardware mapping used. Can be an empty string.
     pub fn set_hardware_mapping(&mut self, mapping: &str) {
         unsafe {
             let _ = CString::from_raw(self.hardware_mapping);
@@ -66,14 +70,23 @@ impl LedMatrixOptions {
         }
     }
 
+    /// The number of rows supported by the display. Typically 16, 32 or 64.
     pub fn set_rows(&mut self, rows: u32) {
         self.rows = rows as c_int;
     }
 
+    /// The number of columns supported by the display. Typically 16, 32 or 64.
+    pub fn set_cols(&mut self, cols: u32) {
+        self.cols = cols as c_int;
+    }
+
+    /// The number of displays daisy-chained together.
     pub fn set_chain_length(&mut self, chain_length: u32) {
         self.chain_length = chain_length as c_int;
     }
 
+    /// The number of parallel chains connected together. Old Pis with 26 pins
+    /// only support 1, but newer Pis with 40 pins can support up to 3.
     pub fn set_parallel(&mut self, parallel: bool) {
         if parallel {
             self.parallel = 1;
@@ -82,6 +95,7 @@ impl LedMatrixOptions {
         }
     }
 
+    /// Sets the PWM bits. Lower values decrease CPU and increase refresh-rate.
     pub fn set_pwm_bits(&mut self, pwm_bits: u8) -> LedMatrixOptionsResult {
         if pwm_bits > 11 {
             Err("Pwm bits can only have value between 0 and 11 inclusive")
@@ -91,10 +105,20 @@ impl LedMatrixOptions {
         }
     }
 
+    /// The base time-unit for the on-time in the lowest significant bit in
+    /// nanoseconds. Higher numbers provide higher quality (more accurate color,
+    /// less ghosting), but have a negative impact on the frame rate.
     pub fn set_pwm_lsb_nanoseconds(&mut self, pwm_lsb_nanoseconds: u32) {
         self.pwm_lsb_nanoseconds = pwm_lsb_nanoseconds as c_int;
     }
 
+    /// The lower bits that can be time-dithered for a higher refresh rate.
+    pub fn set_pwm_dither_bits(&mut self, pwm_dither_bits: i32) {
+        self.pwm_dither_bits = pwm_dither_bits as c_int;
+    }
+
+    /// The initial brightness of the panel in percent. Range of 1..100
+    /// inclusive.
     pub fn set_brightness(&mut self, brightness: u8) -> LedMatrixOptionsResult {
         if brightness > 100 || brightness < 1 {
             Err("Brigthness can only have value between 1 and 100 inclusive")
@@ -104,6 +128,7 @@ impl LedMatrixOptions {
         }
     }
 
+    /// The scan mode to use. 0 = Progressive, 1 = Interlaced.
     pub fn set_scan_mode(&mut self, scan_mode: bool) {
         if scan_mode {
             self.scan_mode = 1 as c_int;
@@ -112,6 +137,19 @@ impl LedMatrixOptions {
         }
     }
 
+    /// The row address type to use. Most panels will use direct (0), but some
+    /// (typically some 64x64 panels) can use shift register (1).
+    pub fn set_row_address_type(&mut self, row_address_type: u32) {
+        self.row_address_type = row_address_type as c_int;
+    }
+
+    /// The type of multiplexing to use. 0 = Direct, 1 = Stripe, 2 = Checker.
+    pub fn set_multiplexing(&mut self, multiplexing: u32) {
+        self.multiplexing = multiplexing as c_int;
+    }
+
+    /// The mapping of the RGB sequence. Most panels use the default RGB, but
+    /// some may differ.
     pub fn set_led_rgb_sequence(&mut self, sequence: &str) {
         unsafe {
             let _ = CString::from_raw(self.led_rgb_sequence);
@@ -119,15 +157,36 @@ impl LedMatrixOptions {
         }
     }
 
-    pub fn set_hardware_pulsing(&mut self, enable: bool) {
-        if enable {
-            self.disable_hardware_pulsing = 0;
-        } else {
-            self.disable_hardware_pulsing = 1;
+    /// A string describing the sequence of pixel mappers that should be applied
+    /// to the matrix. The string is a semicolon-separated list of pixel-mappers
+    /// with an optional parameter.
+    pub fn set_pixel_mapper_config(&mut self, pixel_mapper_config: &str) {
+        unsafe {
+            let _ = CString::from_raw(self.pixel_mapper_config);
+            self.pixel_mapper_config = CString::new(pixel_mapper_config).unwrap().into_raw();
         }
     }
 
-    pub fn set_refresh_rate(&mut self, enable: bool) {
+    /// The panel type. Normally just an empty string, but certain panels
+    /// require an initialisation sequence.
+    pub fn set_panel_type(&mut self, panel_type: &str) {
+        unsafe {
+            let _ = CString::from_raw(self.panel_type);
+            self.panel_type = CString::new(panel_type).unwrap().into_raw();
+        }
+    }
+
+    /// Allow the use of the hardware subsystem to create pulses. This won't do
+    /// anything if output enable is not connected to GPIO 18.
+    pub fn set_disable_hardware_pulsing(&mut self, disable: bool) {
+        if disable {
+            self.disable_hardware_pulsing = 1;
+        } else {
+            self.disable_hardware_pulsing = 0;
+        }
+    }
+
+    pub fn set_show_refresh_rate(&mut self, enable: bool) {
         if enable {
             self.show_refresh_rate = 1;
         } else {
@@ -135,6 +194,7 @@ impl LedMatrixOptions {
         }
     }
 
+    /// Used if the matrix has inverse colours on.
     pub fn set_inverse_colors(&mut self, enable: bool) {
         if enable {
             self.inverse_colors = 1;

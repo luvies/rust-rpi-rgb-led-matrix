@@ -1,5 +1,7 @@
-use libc::{c_char, c_int, c_uint}; //FILE};
+use libc::{c_char, c_int, c_uint};
+use std::error;
 use std::ffi::CString;
+use std::fmt;
 
 pub enum LedMatrix {}
 pub enum LedCanvas {}
@@ -11,7 +13,56 @@ pub struct LedColor {
     pub blue: u8,
 }
 
-type LedMatrixOptionsResult = Result<(), &'static str>;
+type LedMatrixOptionsResult<E> = Result<(), E>;
+
+////////////////////////////// Option Enums //////////////////////////////
+
+pub enum ScanMode {
+    Progressive = 0,
+    Interlaced = 1,
+}
+
+pub enum RowAddressType {
+    Direct = 0,
+    ShiftRegister = 1,
+    DirectABCDLine = 2,
+    ABCShiftRegister = 3,
+}
+
+pub enum Multiplexing {
+    Direct = 0,
+    Stripe = 1,
+    Checkered = 2,
+    Spiral = 3,
+    ZStripe = 4,
+    ZnMirrorZStripe = 5,
+    Coreman = 6,
+}
+
+////////////////////////////// Error Structs //////////////////////////////
+
+/// The error type for the parallel count setter. This is returned if the value
+/// for the parallel count is out of range.
+#[derive(Debug, Clone)]
+pub struct ParallelError {
+    parallel: u16,
+}
+
+/// The error type for the PWM bits setter. This is returned if the value for
+/// the PWM bits is out of range.
+#[derive(Debug, Clone)]
+pub struct PwmBitsError {
+    pwm_bits: u8,
+}
+
+/// The error type for the brightness setter. This is returned if the value for
+/// the brightness is out of range.
+#[derive(Debug, Clone)]
+pub struct BrightnessError {
+    brightness: u8,
+}
+
+////////////////////////////// LED Matrix Options Impl //////////////////////////////
 
 /// Parameters to create a new matrix.
 #[repr(C, packed)]
@@ -50,9 +101,9 @@ impl LedMatrixOptions {
             pwm_lsb_nanoseconds: 1000,
             pwm_dither_bits: 1,
             brightness: 100,
-            scan_mode: 0,
-            row_address_type: 0,
-            multiplexing: 0,
+            scan_mode: ScanMode::Progressive as c_int,
+            row_address_type: RowAddressType::Direct as c_int,
+            multiplexing: Multiplexing::Direct as c_int,
             led_rgb_sequence: CString::new("RGB").unwrap().into_raw(),
             pixel_mapper_config: CString::new("").unwrap().into_raw(),
             panel_type: CString::new("").unwrap().into_raw(),
@@ -71,34 +122,35 @@ impl LedMatrixOptions {
     }
 
     /// The number of rows supported by the display. Typically 16, 32 or 64.
-    pub fn set_rows(&mut self, rows: u32) {
+    pub fn set_rows(&mut self, rows: u16) {
         self.rows = rows as c_int;
     }
 
     /// The number of columns supported by the display. Typically 16, 32 or 64.
-    pub fn set_cols(&mut self, cols: u32) {
+    pub fn set_cols(&mut self, cols: u16) {
         self.cols = cols as c_int;
     }
 
     /// The number of displays daisy-chained together.
-    pub fn set_chain_length(&mut self, chain_length: u32) {
+    pub fn set_chain_length(&mut self, chain_length: u16) {
         self.chain_length = chain_length as c_int;
     }
 
     /// The number of parallel chains connected together. Old Pis with 26 pins
     /// only support 1, but newer Pis with 40 pins can support up to 3.
-    pub fn set_parallel(&mut self, parallel: bool) {
-        if parallel {
-            self.parallel = 1;
+    pub fn set_parallel(&mut self, parallel: u16) -> LedMatrixOptionsResult<ParallelError> {
+        if parallel < 1 || parallel > 3 {
+            Err(ParallelError { parallel })
         } else {
-            self.parallel = 0;
+            self.parallel = parallel as c_int;
+            Ok(())
         }
     }
 
     /// Sets the PWM bits. Lower values decrease CPU and increase refresh-rate.
-    pub fn set_pwm_bits(&mut self, pwm_bits: u8) -> LedMatrixOptionsResult {
+    pub fn set_pwm_bits(&mut self, pwm_bits: u8) -> LedMatrixOptionsResult<PwmBitsError> {
         if pwm_bits > 11 {
-            Err("Pwm bits can only have value between 0 and 11 inclusive")
+            Err(PwmBitsError { pwm_bits })
         } else {
             self.pwm_bits = pwm_bits as c_int;
             Ok(())
@@ -108,7 +160,7 @@ impl LedMatrixOptions {
     /// The base time-unit for the on-time in the lowest significant bit in
     /// nanoseconds. Higher numbers provide higher quality (more accurate color,
     /// less ghosting), but have a negative impact on the frame rate.
-    pub fn set_pwm_lsb_nanoseconds(&mut self, pwm_lsb_nanoseconds: u32) {
+    pub fn set_pwm_lsb_nanoseconds(&mut self, pwm_lsb_nanoseconds: u16) {
         self.pwm_lsb_nanoseconds = pwm_lsb_nanoseconds as c_int;
     }
 
@@ -119,32 +171,28 @@ impl LedMatrixOptions {
 
     /// The initial brightness of the panel in percent. Range of 1..100
     /// inclusive.
-    pub fn set_brightness(&mut self, brightness: u8) -> LedMatrixOptionsResult {
+    pub fn set_brightness(&mut self, brightness: u8) -> LedMatrixOptionsResult<BrightnessError> {
         if brightness > 100 || brightness < 1 {
-            Err("Brigthness can only have value between 1 and 100 inclusive")
+            Err(BrightnessError { brightness })
         } else {
             self.brightness = brightness as c_int;
             Ok(())
         }
     }
 
-    /// The scan mode to use. 0 = Progressive, 1 = Interlaced.
-    pub fn set_scan_mode(&mut self, scan_mode: bool) {
-        if scan_mode {
-            self.scan_mode = 1 as c_int;
-        } else {
-            self.scan_mode = 0 as c_int;
-        }
+    /// The scan mode to use.
+    pub fn set_scan_mode(&mut self, scan_mode: ScanMode) {
+        self.scan_mode = scan_mode as c_int;
     }
 
-    /// The row address type to use. Most panels will use direct (0), but some
-    /// (typically some 64x64 panels) can use shift register (1).
-    pub fn set_row_address_type(&mut self, row_address_type: u32) {
+    /// The row address type to use. Most panels will use direct, but some
+    /// (typically some 64x64 panels) can use shift register.
+    pub fn set_row_address_type(&mut self, row_address_type: RowAddressType) {
         self.row_address_type = row_address_type as c_int;
     }
 
-    /// The type of multiplexing to use. 0 = Direct, 1 = Stripe, 2 = Checker.
-    pub fn set_multiplexing(&mut self, multiplexing: u32) {
+    /// The type of multiplexing to use.
+    pub fn set_multiplexing(&mut self, multiplexing: Multiplexing) {
         self.multiplexing = multiplexing as c_int;
     }
 
@@ -186,8 +234,8 @@ impl LedMatrixOptions {
         }
     }
 
-    pub fn set_show_refresh_rate(&mut self, enable: bool) {
-        if enable {
+    pub fn set_show_refresh_rate(&mut self, show: bool) {
+        if show {
             self.show_refresh_rate = 1;
         } else {
             self.show_refresh_rate = 0;
@@ -195,8 +243,8 @@ impl LedMatrixOptions {
     }
 
     /// Used if the matrix has inverse colours on.
-    pub fn set_inverse_colors(&mut self, enable: bool) {
-        if enable {
+    pub fn set_inverse_colors(&mut self, inverse: bool) {
+        if inverse {
             self.inverse_colors = 1;
         } else {
             self.inverse_colors = 0;
@@ -212,6 +260,8 @@ impl Drop for LedMatrixOptions {
         }
     }
 }
+
+////////////////////////////// LED Canvas Impl //////////////////////////////
 
 #[allow(dead_code)]
 impl LedCanvas {
@@ -317,6 +367,46 @@ impl LedCanvas {
         }
     }
 }
+
+////////////////////////////// Error Struct Impls //////////////////////////////
+
+impl fmt::Display for ParallelError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "parallel count {} out of range (>= 1, <= 3)", self.parallel)
+    }
+}
+
+impl error::Error for ParallelError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
+impl fmt::Display for PwmBitsError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PWM bits {} out of range (>= 0, <= 11)", self.pwm_bits)
+    }
+}
+
+impl error::Error for PwmBitsError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
+impl fmt::Display for BrightnessError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "brightness {} out of range (>= 1, <= 100)", self.brightness)
+    }
+}
+
+impl error::Error for BrightnessError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
+////////////////////////////// Bindings //////////////////////////////
 
 #[link(name = "rgbmatrix")]
 extern "C" {

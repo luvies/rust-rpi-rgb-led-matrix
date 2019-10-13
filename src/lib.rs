@@ -4,27 +4,64 @@ mod c;
 pub mod led_matrix_options;
 
 use libc::{c_char, c_int};
+use std::error;
 use std::ffi::CString;
+use std::fmt;
 use std::path::Path;
 use std::ptr::null;
 
 pub use c::LedColor;
 
+/// A single pixel on a canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pixel {
+    pub x: i32,
+    pub y: i32,
+}
+
+/// A canvas that can be drawn on. If this is the active canvas, then all draws
+/// are pushed to the LED matrix without buffering. If this is the offscreen
+/// canvas, then all changes are buffered until [LedMatrix::swap] is used.
 pub struct LedCanvas {
     handle: *mut c::LedCanvas,
 }
 
+/// The current LED matrix.
 pub struct LedMatrix {
     handle: *mut c::LedMatrix,
     _options: led_matrix_options::Options,
 }
 
+/// A font that can be used to draw text to the LED matrix.
 pub struct LedFont {
     handle: *mut c::LedFont,
 }
 
+/// The error type for [LedMatrix::new] which is returned upon failure to create
+/// a new [LedMatrix].
+#[derive(Debug, Clone)]
+pub struct NewMatrixError;
+
+/// The error type for [LedFont::new] which is returned upon failure to create
+/// a new [LedFont].
+#[derive(Debug, Clone)]
+pub struct NewFontError {
+    kind: NewFontErrorKind,
+}
+
+/// The error kind that cause the [LedFont] create to fail.
+#[derive(Debug, Clone)]
+pub enum NewFontErrorKind {
+    /// The path given was invalid.
+    BadPath,
+    /// The font could not be loaded using the given path.
+    LoadFailed,
+}
+
 impl LedMatrix {
-    pub fn new(options: Option<led_matrix_options::Options>) -> Result<LedMatrix, &'static str> {
+    /// Attempts to construct a new LED matrix with the provided options (or the
+    /// default options).
+    pub fn new(options: Option<led_matrix_options::Options>) -> Result<LedMatrix, NewMatrixError> {
         let options = {
             if let Some(o) = options {
                 o
@@ -42,7 +79,7 @@ impl LedMatrix {
         };
 
         if handle.is_null() {
-            Err("Couldn't create LedMatrix")
+            Err(NewMatrixError)
         } else {
             Ok(LedMatrix {
                 handle,
@@ -51,18 +88,23 @@ impl LedMatrix {
         }
     }
 
+    /// Gets the active canvas from the LED matrix that can be drawn on.
     pub fn canvas(&self) -> LedCanvas {
         let handle = unsafe { c::led_matrix_get_canvas(self.handle) };
 
         LedCanvas { handle }
     }
 
+    /// Creates a new canvas that can be drawn on and then swapped in using
+    /// [LedMatrix::swap].
     pub fn offscreen_canvas(&self) -> LedCanvas {
         let handle = unsafe { c::led_matrix_create_offscreen_canvas(self.handle) };
 
         LedCanvas { handle }
     }
 
+    /// Swaps the given canvas to active and returns the now inactive old canvas
+    /// for buffering the next frame.
     pub fn swap(&self, canvas: LedCanvas) -> LedCanvas {
         let handle = unsafe { c::led_matrix_swap_on_vsync(self.handle, canvas.handle) };
 
@@ -79,17 +121,24 @@ impl Drop for LedMatrix {
 }
 
 impl LedFont {
-    pub fn new(bdf_file: &Path) -> Result<LedFont, &'static str> {
+    /// Attempts to construct a new LED font.
+    pub fn new(bdf_file: &Path) -> Result<LedFont, NewFontError> {
         let string = match bdf_file.to_str() {
             Some(s) => s,
-            None => return Err("Couldn't convert path to str"),
+            None => {
+                return Err(NewFontError {
+                    kind: NewFontErrorKind::BadPath,
+                })
+            }
         };
         let cstring = CString::new(string).unwrap();
 
         let handle = unsafe { c::load_font(cstring.as_ptr()) };
 
         if handle.is_null() {
-            Err("Couldn't load font")
+            Err(NewFontError {
+                kind: NewFontErrorKind::LoadFailed,
+            })
         } else {
             Ok(LedFont { handle })
         }
@@ -103,51 +152,52 @@ impl Drop for LedFont {
 }
 
 impl LedCanvas {
+    /// Gets the size of the canvas.
     pub fn size(&self) -> (i32, i32) {
         let (mut width, mut height): (c_int, c_int) = (0, 0);
         unsafe {
-            c::led_canvas_get_size(
-                self.handle,
-                &mut width as *mut c_int,
-                &mut height as *mut c_int,
-            );
+            c::led_canvas_get_size(self.handle, &mut width, &mut height);
         }
         (width as i32, height as i32)
     }
 
-    pub fn set(&mut self, x: i32, y: i32, color: &LedColor) {
+    /// Sets the colour of the given pixel in the canvas.
+    pub fn set(&mut self, pixel: Pixel, color: &LedColor) {
         unsafe {
             c::led_canvas_set_pixel(
                 self.handle,
-                x as c_int,
-                y as c_int,
+                pixel.x as c_int,
+                pixel.y as c_int,
                 color.red,
                 color.green,
                 color.blue,
-            )
+            );
         }
     }
 
+    /// Sets all the pixels to black.
     pub fn clear(&mut self) {
         unsafe {
             c::led_canvas_clear(self.handle);
         }
     }
 
+    /// Fills the canvas with the given colour.
     pub fn fill(&mut self, color: &LedColor) {
         unsafe {
             c::led_canvas_fill(self.handle, color.red, color.green, color.blue);
         }
     }
 
-    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: &LedColor) {
+    /// Draws a line between 2 points on the canvas using the given colour.
+    pub fn draw_line(&mut self, begin: Pixel, end: Pixel, color: &LedColor) {
         unsafe {
             c::draw_line(
                 self.handle,
-                x0,
-                y0,
-                x1,
-                y1,
+                begin.x as c_int,
+                begin.y as c_int,
+                end.x as c_int,
+                end.y as c_int,
                 color.red,
                 color.green,
                 color.blue,
@@ -155,12 +205,14 @@ impl LedCanvas {
         }
     }
 
-    pub fn draw_circle(&mut self, x: i32, y: i32, radius: u32, color: &LedColor) {
+    /// Draws a circle of the given radius around the point using the given
+    /// colour.
+    pub fn draw_circle(&mut self, center: Pixel, radius: u16, color: &LedColor) {
         unsafe {
             c::draw_circle(
                 self.handle,
-                x as c_int,
-                y as c_int,
+                center.x as c_int,
+                center.y as c_int,
                 radius as c_int,
                 color.red,
                 color.green,
@@ -169,12 +221,12 @@ impl LedCanvas {
         }
     }
 
+    /// Draws a line of text on the canvas starting from the given point.
     pub fn draw_text(
         &mut self,
         font: &LedFont,
         text: &str,
-        x: i32,
-        y: i32,
+        pixel: Pixel,
         color: &LedColor,
         kerning_offset: i32,
         vertical: bool,
@@ -185,8 +237,8 @@ impl LedCanvas {
                 c::vertical_draw_text(
                     self.handle,
                     font.handle,
-                    x as c_int,
-                    y as c_int,
+                    pixel.x as c_int,
+                    pixel.y as c_int,
                     color.red,
                     color.green,
                     color.blue,
@@ -197,8 +249,8 @@ impl LedCanvas {
                 c::draw_text(
                     self.handle,
                     font.handle,
-                    x as c_int,
-                    y as c_int,
+                    pixel.x as c_int,
+                    pixel.y as c_int,
                     color.red,
                     color.green,
                     color.blue,
@@ -207,6 +259,30 @@ impl LedCanvas {
                 ) as i32
             }
         }
+    }
+}
+
+impl fmt::Display for NewMatrixError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "failed to create LED matrix")
+    }
+}
+
+impl error::Error for NewMatrixError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
+impl fmt::Display for NewFontError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "failed to create LED font")
+    }
+}
+
+impl error::Error for NewFontError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
     }
 }
 
@@ -252,7 +328,14 @@ mod tests {
         canvas.clear();
         for x in 0..width {
             color.blue = 255 - 3 * x as u8;
-            canvas.draw_line(x, 0, width - 1 - x, height - 1, &color);
+            canvas.draw_line(
+                Pixel { x, y: 0 },
+                Pixel {
+                    x: width - 1 - x,
+                    y: height - 1,
+                },
+                &color,
+            );
             thread::sleep(time::Duration::new(0, 10000000));
         }
     }
@@ -274,7 +357,7 @@ mod tests {
             color.green = color.red;
             color.red = color.blue;
             color.blue = (r * r) as u8;
-            canvas.draw_circle(x, y, r as u32, &color);
+            canvas.draw_circle(Pixel { x, y }, r as u16, &color);
             thread::sleep(time::Duration::new(0, 100000000));
         }
     }
@@ -297,12 +380,10 @@ mod tests {
         for x in 0..(2 * width) {
             let x = x % (10 * 9);
             canvas.clear();
-            canvas.draw_text(&font, "Mah boy! ", x, baseline, &color, 0, false);
             canvas.draw_text(
                 &font,
                 "Mah boy! ",
-                x - text_width,
-                baseline,
+                Pixel { x, y: baseline },
                 &color,
                 0,
                 false,
@@ -310,8 +391,21 @@ mod tests {
             canvas.draw_text(
                 &font,
                 "Mah boy! ",
-                x + text_width,
-                baseline,
+                Pixel {
+                    x: x - text_width,
+                    y: baseline,
+                },
+                &color,
+                0,
+                false,
+            );
+            canvas.draw_text(
+                &font,
+                "Mah boy! ",
+                Pixel {
+                    x: x + text_width,
+                    y: baseline,
+                },
                 &color,
                 0,
                 false,

@@ -366,7 +366,7 @@ mod tests {
     fn draw_text() {
         let matrix = led_matrix();
         let mut canvas = matrix.canvas();
-        let font = LedFont::new(Path::new("/usr/share/fonts/misc/10x20.bdf")).unwrap();
+        let font = LedFont::new(Path::new("test/10x20.bdf")).unwrap();
         let color = LedColor {
             red: 0,
             green: 127,

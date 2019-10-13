@@ -1,5 +1,7 @@
 extern crate libc;
+
 mod c;
+pub mod led_matrix_options;
 
 use libc::{c_char, c_int};
 use std::ffi::CString;
@@ -7,7 +9,6 @@ use std::path::Path;
 use std::ptr::null;
 
 pub use c::LedColor;
-pub use c::LedMatrixOptions;
 
 pub struct LedCanvas {
     handle: *mut c::LedCanvas,
@@ -15,7 +16,7 @@ pub struct LedCanvas {
 
 pub struct LedMatrix {
     handle: *mut c::LedMatrix,
-    _options: LedMatrixOptions,
+    _options: led_matrix_options::Options,
 }
 
 pub struct LedFont {
@@ -23,18 +24,18 @@ pub struct LedFont {
 }
 
 impl LedMatrix {
-    pub fn new(options: Option<LedMatrixOptions>) -> Result<LedMatrix, &'static str> {
+    pub fn new(options: Option<led_matrix_options::Options>) -> Result<LedMatrix, &'static str> {
         let options = {
             if let Some(o) = options {
                 o
             } else {
-                LedMatrixOptions::new()
+                led_matrix_options::Options::new()
             }
         };
 
         let handle = unsafe {
             c::led_matrix_create_from_options(
-                &options as *const LedMatrixOptions,
+                &options as *const led_matrix_options::Options,
                 null::<c_int>() as *mut c_int,
                 null::<c_char>() as *mut *mut *mut c_char,
             )
@@ -216,7 +217,7 @@ mod tests {
     use std::{thread, time};
 
     fn led_matrix() -> LedMatrix {
-        let mut options = LedMatrixOptions::new();
+        let mut options = led_matrix_options::Options::new();
         options.set_hardware_mapping("adafruit-hat-pwm");
         options.set_chain_length(2);
         options.set_disable_hardware_pulsing(true);

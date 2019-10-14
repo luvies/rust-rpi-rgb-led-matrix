@@ -292,13 +292,17 @@ mod tests {
     use std::f64::consts::PI;
     use std::{thread, time};
 
+    const ROWS: u16 = 64;
+    const COLS: u16 = 64;
+    const CHAIN_LENGTH: u16 = 1;
+
     fn led_matrix() -> LedMatrix {
         let mut options = led_matrix_options::Options::new();
         options.set_hardware_mapping("adafruit-hat-pwm");
-        options.set_chain_length(2);
-        options.set_disable_hardware_pulsing(true);
-        //options.set_inverse_colors(true);
-        //options.set_refresh_rate(true);
+        options.set_chain_length(CHAIN_LENGTH);
+        options.set_disable_hardware_pulsing(false);
+        options.set_rows(ROWS);
+        options.set_cols(COLS);
         LedMatrix::new(Some(options)).unwrap()
     }
 
@@ -311,7 +315,7 @@ mod tests {
     fn canvas_size() {
         let matrix = led_matrix();
         let canvas = matrix.canvas();
-        assert_eq!(canvas.size(), (64, 32));
+        assert_eq!(canvas.size(), (COLS as i32 * CHAIN_LENGTH as i32, ROWS as i32));
     }
 
     #[test]
